@@ -1,0 +1,9 @@
+/node_modules
+
+.env
+
+package-lock.json
+
+/.clinic
+
+node_trace.*.log
