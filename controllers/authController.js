@@ -101,11 +101,6 @@ const logoutUser = catchAsyncErrors(async (req, res, next) => {
     BearerAuth: []
   }]
   */
-  res.cookie("token", null, {
-    expires: new Date(Date.now()),
-    httpOnly: true,
-  });
-
   // send response
   return sendResponse(res, 1, 200, "User logged out successfully");
 });
@@ -124,11 +119,6 @@ const refreshToken = catchAsyncErrors(async (req, res, next) => {
 
   try {
     const newToken = await generateToken(req.user._id);
-    res.cookie("token", newToken, {
-      expires: new Date(Date.now() + 24 * 60 * 60 * 1000), // * 1 day
-      httpOnly: true,
-    });
-
     // send response
     return sendResponse(
       res,
