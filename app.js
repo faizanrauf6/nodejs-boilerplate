@@ -1,7 +1,7 @@
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const morgan = require("morgan");
-const dataBaseConnect = require("./database/db.js");
+const databaseConnection = require("./database/db.js");
 const ErrorHandler = require("./middlewares/error.js");
 const appRoutes = require("./routes/index");
 const cors = require("cors");
@@ -21,9 +21,11 @@ process.on("uncaughtException", (err) => {
 
 // ! import middleware app
 app.use((req, res, next) => {
+  // ! if condition is used only for stripe webhook
   if (req.originalUrl.startsWith("/api/v1/order/stripe/webhook")) {
     bodyParser.raw({ type: "application/json" })(req, res, next);
   } else {
+    // ! for all other routes
     express.json()(req, res, next);
   }
 });
@@ -39,8 +41,8 @@ app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
-// ! starting the DataBase
-dataBaseConnect();
+// ! starting the Database
+databaseConnection();
 
 // ! Error handling for multer
 app.use((err, req, res, next) => {

@@ -3,10 +3,11 @@ const { toJSON } = require("./plugins");
 
 const userSchema = new mongoose.Schema(
   {
-    name: {
+    role: {
       type: String,
-      required: true,
-      trim: true,
+      default: "user",
+      enum: ["user", "admin"],
+      index: true,
     },
     email: {
       type: String,
@@ -14,45 +15,128 @@ const userSchema = new mongoose.Schema(
       unique: true,
       trim: true,
       lowercase: true,
+      index: true,
+    },
+    firstName: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
+    lastName: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
     },
     password: {
       type: String,
       required: true,
       trim: true,
       minLength: 8,
-      select: false, // ! this will not show the password in the response
-      private: true, // used by the toJSON plugin
+      select: false,
+      private: true,
     },
-    role: {
+    phoneNo: {
       type: String,
-      default: "user",
-      enum: ["user", "admin"],
+      trim: true,
+      required: false,
     },
-    avatar: {
-      type: String,
-      default: `https://ui-avatars.com/api/?name=Default&background=random`,
+    isVerified: {
+      type: Boolean,
+      default: false,
     },
-    resetPasswordToken: {
+    previousPasswords: [{ type: String }],
+    gender: {
       type: String,
+      default: "male",
+      enum: ["male", "female", "other"],
+    },
+    language: {
+      type: String,
+      required: false,
       default: null,
+    },
+    spokenLangs: [{ type: String }],
+    interests: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Interest",
+      },
+    ],
+    nationality: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    dob: {
+      type: Date,
+      required: false,
+      default: null,
+    },
+    bio: {
+      type: String,
+      trim: true,
+      required: false,
+      default: null,
+    },
+    availability: {
+      type: Boolean,
+      default: false,
     },
     isLoggedIn: {
       type: Boolean,
       default: false,
     },
+    jwtToken: {
+      type: String,
+      default: null,
+    },
+    fcmToken: {
+      type: String,
+      default: null,
+    },
+    resetPasswordToken: {
+      type: String,
+      default: null,
+    },
     status: {
       type: String,
-      enum: ["active", "banned"],
       default: "active",
+      enum: ["active", "banned"],
+      index: true,
     },
+    avatar: {
+      type: String,
+      default: `https://ui-avatars.com/api/?name=Default&background=random`,
+    },
+    friends: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
   },
   {
     timestamps: true,
   }
 );
 
+// Virtual property for the full name
+userSchema.virtual("fullName").get(function () {
+  return `${this.firstName} ${this.lastName}`;
+});
+
 // add plugin that converts mongoose to json
 userSchema.plugin(toJSON);
+
+// add index for unique email, status, interests, friends, firstName+lastName and role field, as it's commonly used in queries
+userSchema.index({ role: 1 });
+userSchema.index({ firstName: 1, lastName: 1 });
+userSchema.index({ status: 1 });
+userSchema.index({ email: 1 });
+userSchema.index({ interests: 1 });
+userSchema.index({ friends: 1 });
 
 /**
  * @typedef User
