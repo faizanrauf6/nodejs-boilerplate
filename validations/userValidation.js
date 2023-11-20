@@ -1,16 +1,27 @@
-const Joi = require("joi");
+const Joi = require('joi');
 
-const updateProfile = {
+const userExistence = {
   body: Joi.object().keys({
-    name: Joi.string(),
-    name: Joi.string(),
+    username: Joi.string(),
   }),
 };
 
-const updateRole = {
+const updateProfile = {
   body: Joi.object().keys({
-    role: Joi.string(),
-    name: Joi.string(),
+    firstName: Joi.string(),
+    lastName: Joi.string(),
+    email: Joi.string(),
+    phoneNo: Joi.string(),
+    address: Joi.string(),
+    latitude: Joi.string(),
+    longitude: Joi.string(),
+    city: Joi.string(),
+    state: Joi.string(),
+    zipCode: Joi.number(),
+    country: Joi.string(),
+    avatar: Joi.string(),
+    interests: Joi.array(),
+    spokenLang: Joi.array(),
   }),
 };
 
@@ -23,7 +34,7 @@ const getAllUsers = {
 };
 
 module.exports = {
+  userExistence,
   updateProfile,
-  updateRole,
   getAllUsers,
 };

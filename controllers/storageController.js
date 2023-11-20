@@ -1,22 +1,24 @@
 const catchAsyncErrors = require("../middlewares/catchAsyncError");
 const ErrorHandler = require("../utils/errorHandling");
-const { Storage } = require("../models");
+const { User } = require("../models");
 const { sendResponse } = require("../helpers/response");
 const { logSuccess, logFailure } = require("../services/logs");
+const helperMessages = require("../helpers/englishMessages");
+const uploadFileToGCS = require("../services/fileUpload");
 
-// ! Upload file with storage server /api/v1/storage/uploadFile
-const uploadFile = catchAsyncErrors(async (req, res) => {
+// ! Upload file with storage on GCS server /api/v1/storage/uploadFileGCS
+const uploadFileGCS = catchAsyncErrors(async (req, res, next) => {
   /* 
     #swagger.tags = ['Storage']
-    #swagger.summary = 'Upload File.'
+    #swagger.summary = 'Upload File GCS.'
     #swagger.consumes = ['application/json']
     #swagger.produces = ['application/json']
     #swagger.security = [{
       BearerAuth: []
     }]
   */
+  const { _id } = req.user;
   const file = req.file;
-  const userId = req.user._id;
   let request = {
     url: req.originalUrl,
     method: req.originalMethod,
@@ -24,42 +26,77 @@ const uploadFile = catchAsyncErrors(async (req, res) => {
   };
 
   try {
-    // ! check if file exists
+    const user = await User.exists({ _id });
+    if (!user) {
+      return sendResponse(res, 0, 404, helperMessages.userNotFound);
+    }
     if (!file) {
-      return next(new ErrorHandler("Please upload a file", 400));
+      return next(new ErrorHandler(helperMessages.noFile, 400));
     }
 
-    // ! Create a new file record in the database
-    const newFile = new Storage({
-      userId,
-      bucket: config.aws.bucketName,
-      fileUrl: config.aws.awsUrl + file.key,
-      fileId: file.key,
-      fileName: file.originalname,
-      fileSize: file.size,
-      mimeType: file.mimetype,
-    });
+    const fileName = `${Date.now()}-${file.originalname}`;
+    const result = await uploadFileToGCS(file, fileName, _id);
 
-    // Save the file information to the database
-    const result = await newFile.save();
+    await logSuccess(null, _id, request, result, __filename, "uploadFileGCS");
+    return sendResponse(res, 1, 200, helperMessages.fileUploaded, result);
+  } catch (error) {
+    await logFailure(error, _id, request);
+    return sendResponse(res, 1, 500, error.message);
+  }
+});
 
-    // log data in the try block (success case)
+// ! Upload file Uri with storage on GCS server /api/v1/storage/uploadFileUriGCS
+const uploadFileUriGCS = catchAsyncErrors(async (req, res, next) => {
+  /* 
+    #swagger.tags = ['Storage']
+    #swagger.summary = 'Upload File Uri GCS.'
+    #swagger.consumes = ['application/json']
+    #swagger.produces = ['application/json']
+    #swagger.security = [{
+      BearerAuth: []
+    }]
+  */
+  const { _id } = req.user;
+  const file = req.file;
+  let request = {
+    url: req.originalUrl,
+    method: req.originalMethod,
+    body: req.body,
+  };
+
+  try {
+    const user = await User.exists({ _id });
+    if (!user) {
+      return sendResponse(res, 0, 404, helperMessages.userNotFound);
+    }
+    if (!file) {
+      return next(new ErrorHandler(helperMessages.noFile, 400));
+    }
+
+    const fileName = `${Date.now()}-${file.originalname}`;
+    const result = await uploadFileToGCS(
+      file,
+      fileName,
+      _id,
+      (generateSignedUrl = true)
+    );
+
     await logSuccess(
       null,
-      req.user._id,
+      _id,
       request,
       result,
       __filename,
-      "uploadFile"
+      "uploadFileUriGCS"
     );
-    // send response
-    return sendResponse(res, 1, 200, "File uploaded successfully", result);
+    return sendResponse(res, 1, 200, helperMessages.fileUploaded, result);
   } catch (error) {
-    await logFailure(error, req.user._id, request);
-    return next(new ErrorHandler(error.message, 500));
+    await logFailure(error, _id, request);
+    return sendResponse(res, 1, 500, error.message);
   }
 });
 
 module.exports = {
-  uploadFile,
+  uploadFileGCS,
+  uploadFileUriGCS,
 };

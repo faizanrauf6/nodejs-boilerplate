@@ -1,10 +1,13 @@
-const { generatePassword, comparePassword } = require("../config/bcrypt");
-const { generateToken, validateToken } = require("../config/jwt");
-const catchAsyncErrors = require("../middlewares/catchAsyncError");
-const ErrorHandler = require("../utils/errorHandling");
-const { User } = require("../models");
-const { sendResponse } = require("../helpers/response");
-const { logSuccess, logFailure } = require("../services/logs");
+const { generatePassword, comparePassword } = require('../config/bcrypt');
+const { generateToken, validateToken } = require('../config/jwt');
+const catchAsyncErrors = require('../middlewares/catchAsyncError');
+const ErrorHandler = require('../utils/errorHandling');
+const { User } = require('../models');
+const { sendResponse } = require('../helpers/response');
+const { logSuccess, logFailure } = require('../services/logs');
+const helperMessages = require('../helpers/englishMessages');
+const sendMail = require('../config/mailer');
+const config = require('../config/config');
 
 // ! Register User /api/v1/auth/register
 const registerUser = catchAsyncErrors(async (req, res, next) => {
@@ -14,7 +17,14 @@ const registerUser = catchAsyncErrors(async (req, res, next) => {
       #swagger.consumes = ['application/json']
       #swagger.produces = ['application/json']
   */
-  const { name, email, password, role = "user" } = req.body;
+  const {
+    username,
+    email,
+    password,
+    language,
+    fcmToken,
+    role = 'user',
+  } = req.body;
   const request = {
     url: req.originalUrl,
     method: req.originalMethod,
@@ -24,32 +34,40 @@ const registerUser = catchAsyncErrors(async (req, res, next) => {
     // ! Check if user already exists
     const userExists = await User.findOne({ email });
     if (userExists) {
-      return next(new ErrorHandler("User already exists", 400));
+      return next(new ErrorHandler(helperMessages.userExists, 400));
     }
     // ! Hashing password
     const hashPassword = await generatePassword(password);
     // ! Generate avatar
-    const avatar = `https://ui-avatars.com/api/?name=${name.replace(
-      " ",
-      "+"
+    const avatar = `https://ui-avatars.com/api/?name=${username.replace(
+      ' ',
+      '+'
     )}&background=random`;
+
+    // ! Saving hash password into previously stored password array
+    let newPassword = [];
+    newPassword.push(hashPassword);
+
     // ! Create user
     await User.create({
-      name,
+      username,
       email,
       avatar,
       role,
+      language,
+      fcmToken,
       password: hashPassword,
+      previousPasswords: newPassword,
     });
 
     // log data in the try block (success case)
-    await logSuccess(null, null, request, null, __filename, "registerUser");
+    await logSuccess(null, null, request, null, __filename, 'registerUser');
 
     // send response
-    return sendResponse(res, 1, 201, "User created successfully");
+    return sendResponse(res, 1, 201, helperMessages.userCreated);
   } catch (error) {
     await logFailure(error, null, request);
-    return next(new ErrorHandler(error.message, 500));
+    return sendResponse(res, 1, 500, error.message);
   }
 });
 
@@ -64,7 +82,7 @@ const loginUser = catchAsyncErrors(async (req, res, next) => {
       BearerAuth: []
     }]
   */
-  const { email, password } = req.body;
+  const { email, password, fcmToken } = req.body;
   const request = {
     url: req.originalUrl,
     method: req.originalMethod,
@@ -72,27 +90,42 @@ const loginUser = catchAsyncErrors(async (req, res, next) => {
   };
   try {
     // ! Check if user exists
-    const userExists = await User.findOne({ email }).select("+password");
+    const userExists = await User.findOne({ email, isDisabled: false }).select(
+      '+password'
+    );
     if (!userExists) {
-      return next(new ErrorHandler("Invalid credentials", 401));
+      return next(new ErrorHandler(helperMessages.userNotFound, 404));
     }
     // ! Compare password
     const isPasswordMatched = await comparePassword(
       password,
       userExists.password
     );
-
     if (!isPasswordMatched) {
-      return next(new ErrorHandler("Invalid credentials", 401));
+      return next(new ErrorHandler(helperMessages.invalidCred, 401));
     }
 
-    // ! Generate token
-    const token = await generateToken(userExists._id);
+    let token;
+    if (userExists.isLoggedIn) {
+      // ! Generate token
+      token = await generateToken(userExists._id);
+      userExists.jwtToken = token;
+    } else {
+      // ! Generate token
+      token = await generateToken(userExists._id);
+      userExists.isLoggedIn = true;
+      userExists.jwtToken = token;
+    }
+
+    // ! Updating user details
+    userExists.fcmToken = fcmToken;
+    await User.updateOne({ _id: userExists._id }, userExists);
 
     // ! Create a sanitized user object without the password
     const sanitizedUser = {
       _id: userExists._id,
       email: userExists.email,
+      username: userExists.username,
       role: userExists.role,
       avatar: userExists.avatar,
     };
@@ -104,7 +137,7 @@ const loginUser = catchAsyncErrors(async (req, res, next) => {
       request,
       sanitizedUser,
       __filename,
-      "loginUser"
+      'loginUser'
     );
 
     // send response
@@ -112,13 +145,13 @@ const loginUser = catchAsyncErrors(async (req, res, next) => {
       res,
       1,
       200,
-      "User logged in successfully",
+      helperMessages.loggedIn,
       sanitizedUser,
       token
     );
   } catch (error) {
     await logFailure(error, null, request);
-    return next(new ErrorHandler(error.message, 500));
+    return sendResponse(res, 1, 500, error.message);
   }
 });
 
@@ -133,19 +166,27 @@ const logoutUser = catchAsyncErrors(async (req, res, next) => {
     BearerAuth: []
   }]
   */
+  const { _id } = req.user;
   const request = {
     url: req.originalUrl,
     method: req.originalMethod,
     body: req.body,
   };
   try {
+    // Update user's FCM token and JWT token to null
+    await User.findByIdAndUpdate(_id, {
+      $set: {
+        fcmToken: null,
+        jwtToken: null,
+      },
+    });
     // log data in the try block (success case)
-    await logSuccess(null, null, request, null, __filename, "logoutUser");
+    await logSuccess(null, _id, request, null, __filename, 'logoutUser');
     // send response
-    return sendResponse(res, 1, 200, "User logged out successfully");
+    return sendResponse(res, 1, 200, helperMessages.logout);
   } catch (error) {
-    await logFailure(error, null, request);
-    return next(new ErrorHandler(error.message, 500));
+    await logFailure(error, _id, request);
+    return sendResponse(res, 1, 500, error.message);
   }
 });
 
@@ -160,34 +201,28 @@ const refreshToken = catchAsyncErrors(async (req, res, next) => {
     BearerAuth: []
   }]
   */
+  const { _id } = req.user;
   const request = {
     url: req.originalUrl,
     method: req.originalMethod,
     body: req.body,
   };
   try {
-    const newToken = await generateToken(req.user._id);
+    const newToken = await generateToken(_id);
     // log data in the try block (success case)
-    await logSuccess(
-      null,
-      req.user._id,
-      request,
-      newToken,
-      __filename,
-      "refreshToken"
-    );
+    await logSuccess(null, _id, request, newToken, __filename, 'refreshToken');
     // send response
     return sendResponse(
       res,
       1,
       200,
-      "Token refreshed successfully",
+      helperMessages.refreshTokenGenerated,
       null,
       newToken
     );
   } catch (error) {
-    await logFailure(error, req.user._id, request);
-    return next(new ErrorHandler("You are not authorized", 401));
+    await logFailure(error, _id, request);
+    return sendResponse(res, 1, 401, helperMessages.notAuthorized);
   }
 });
 
@@ -209,13 +244,22 @@ const forgotPassword = catchAsyncErrors(async (req, res, next) => {
     // ! Check if user exists
     const userExists = await User.findOne({ email });
     if (!userExists) {
-      return next(new ErrorHandler("User not found", 404));
+      return next(new ErrorHandler('User not found', 404));
     }
     // ! Generate token
-    const token = await generateToken(userExists._id, "10m");
+    const token = await generateToken(userExists._id, '10m');
 
     // ! Create reset password url
-    const resetUrl = `${process.env.FRONTEND_URL}/password/reset/${token}`;
+    const resetUrl = `http://localhost:${config.port}/password/reset/${token}`;
+
+    // Send the password reset email
+    const mailOptions = {
+      from: config.email.from,
+      to: email,
+      subject: 'Password Reset',
+      text: `Click the following link to reset your password: ${resetUrl}`,
+    };
+    await sendMail(mailOptions);
 
     // ! Add reset password token to user
     userExists.resetPasswordToken = token;
@@ -228,20 +272,13 @@ const forgotPassword = catchAsyncErrors(async (req, res, next) => {
       request,
       userExists,
       __filename,
-      "forgotPassword"
+      'forgotPassword'
     );
     // send response
-    return sendResponse(
-      res,
-      1,
-      200,
-      "Reset password url sent successfully",
-      resetUrl,
-      token
-    );
+    return sendResponse(res, 1, 200, helperMessages.resetEmailSent, resetUrl);
   } catch (error) {
     await logFailure(error, null, request);
-    return next(new ErrorHandler(error.message, 500));
+    return sendResponse(res, 1, 500, error.message);
   }
 });
 
@@ -277,24 +314,24 @@ const resetPassword = catchAsyncErrors(async (req, res, next) => {
     // ! Check user by token
     const decoded = await validateToken(token);
     if (!decoded) {
-      return next(new ErrorHandler("Invalid token", 400));
+      return next(new ErrorHandler('Invalid token', 400));
     }
     // ! Check if user exists
-    const userExists = await User.findById(decoded.id).select("+password");
+    const userExists = await User.findById(decoded.id).select('+password');
     if (!userExists) {
-      return next(new ErrorHandler("User not found", 404));
+      return next(new ErrorHandler('User not found', 404));
     }
 
     // ! Check if token is valid
     if (token !== userExists.resetPasswordToken) {
-      return next(new ErrorHandler("Invalid token", 400));
+      return next(new ErrorHandler('Invalid token', 400));
     }
     // ! Hashing password
     const hashPassword = await generatePassword(password);
     // ! Update password
     userExists.password = hashPassword;
     // ! Invalidate token after reset password
-    userExists.resetPasswordToken = undefined;
+    userExists.resetPasswordToken = null;
     await userExists.save();
 
     // log data in the try block (success case)
@@ -304,13 +341,13 @@ const resetPassword = catchAsyncErrors(async (req, res, next) => {
       request,
       userExists,
       __filename,
-      "resetPassword"
+      'resetPassword'
     );
     // send response
-    return sendResponse(res, 1, 200, "Password reset successfully");
+    return sendResponse(res, 1, 200, helperMessages.passwordReset);
   } catch (error) {
     await logFailure(error, null, request);
-    return next(new ErrorHandler(error.message, 500));
+    return sendResponse(res, 1, 500, error.message);
   }
 });
 
@@ -324,13 +361,14 @@ const updatePassword = catchAsyncErrors(async (req, res, next) => {
   }]
   */
   const { currentPassword, newPassword } = req.body;
+  const { _id } = req.user;
   let request = {
     url: req.originalUrl,
     method: req.originalMethod,
     body: req.body,
   };
   try {
-    let userExists = await User.findById(req.user._id).select("+password");
+    let userExists = await User.findById(_id).select('+password');
     // ! Compare password
     const isPasswordMatched = await comparePassword(
       currentPassword,
@@ -338,7 +376,7 @@ const updatePassword = catchAsyncErrors(async (req, res, next) => {
     );
 
     if (!isPasswordMatched) {
-      return next(new ErrorHandler("Invalid password", 401));
+      return next(new ErrorHandler(helperMessages.invalidOldPass, 401));
     }
     // ! Hashing password
     const hashPassword = await generatePassword(newPassword);
@@ -353,13 +391,13 @@ const updatePassword = catchAsyncErrors(async (req, res, next) => {
       request,
       userExists,
       __filename,
-      "updatePassword"
+      'updatePassword'
     );
     // send response
-    return sendResponse(res, 1, 200, "Password updated successfully");
+    return sendResponse(res, 1, 200, helperMessages.passwordChanged);
   } catch (error) {
-    await logFailure(error, req.user._id, request);
-    return next(new ErrorHandler(error.message, 500));
+    await logFailure(error, _id, request);
+    return sendResponse(res, 1, 500, error.message);
   }
 });
 

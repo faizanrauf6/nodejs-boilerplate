@@ -71,7 +71,7 @@ app.use("/api/v1", appRoutes);
 
 // ! Starting message
 app.get("/", (req, res) => {
-  return res.status(200).send("Welcome to NodeJs Backend");
+  return res.status(200).send("Welcome to SpeakShift Backend");
 });
 
 // ! Swagger

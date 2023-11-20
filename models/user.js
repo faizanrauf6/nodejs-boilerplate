@@ -1,12 +1,20 @@
-const mongoose = require("mongoose");
-const { toJSON } = require("./plugins");
+const mongoose = require('mongoose');
+const { toJSON } = require('./plugins');
 
 const userSchema = new mongoose.Schema(
   {
     role: {
       type: String,
-      default: "user",
-      enum: ["user", "admin"],
+      default: 'user',
+      enum: ['user', 'admin'],
+      index: true,
+    },
+    username: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+      lowercase: true,
       index: true,
     },
     email: {
@@ -19,15 +27,13 @@ const userSchema = new mongoose.Schema(
     },
     firstName: {
       type: String,
-      required: true,
-      trim: true,
-      index: true,
+      required: false,
+      default: null,
     },
     lastName: {
       type: String,
-      required: true,
-      trim: true,
-      index: true,
+      required: false,
+      default: null,
     },
     password: {
       type: String,
@@ -49,8 +55,8 @@ const userSchema = new mongoose.Schema(
     previousPasswords: [{ type: String }],
     gender: {
       type: String,
-      default: "male",
-      enum: ["male", "female", "other"],
+      default: 'male',
+      enum: ['male', 'female', 'other'],
     },
     language: {
       type: String,
@@ -61,7 +67,7 @@ const userSchema = new mongoose.Schema(
     interests: [
       {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "Interest",
+        ref: 'Interest',
       },
     ],
     nationality: {
@@ -88,6 +94,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    isDisabled: {
+      type: Boolean,
+      default: false,
+    },
     jwtToken: {
       type: String,
       default: null,
@@ -102,8 +112,8 @@ const userSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      default: "active",
-      enum: ["active", "banned"],
+      default: 'active',
+      enum: ['active', 'banned'],
       index: true,
     },
     avatar: {
@@ -113,7 +123,7 @@ const userSchema = new mongoose.Schema(
     friends: [
       {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
+        ref: 'User',
       },
     ],
   },
@@ -123,16 +133,15 @@ const userSchema = new mongoose.Schema(
 );
 
 // Virtual property for the full name
-userSchema.virtual("fullName").get(function () {
+userSchema.virtual('fullName').get(function () {
   return `${this.firstName} ${this.lastName}`;
 });
 
 // add plugin that converts mongoose to json
 userSchema.plugin(toJSON);
 
-// add index for unique email, status, interests, friends, firstName+lastName and role field, as it's commonly used in queries
-userSchema.index({ role: 1 });
-userSchema.index({ firstName: 1, lastName: 1 });
+// add index for unique email, status, interests, friends, and username field, as it's commonly used in queries
+userSchema.index({ username: 1 });
 userSchema.index({ status: 1 });
 userSchema.index({ email: 1 });
 userSchema.index({ interests: 1 });
@@ -141,4 +150,4 @@ userSchema.index({ friends: 1 });
 /**
  * @typedef User
  */
-module.exports = mongoose.model("User", userSchema);
+module.exports = mongoose.model('User', userSchema);

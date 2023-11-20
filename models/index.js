@@ -1,4 +1,13 @@
 module.exports.User = require("./user");
+module.exports.Room = require("./room");
+module.exports.Chat = require("./chat");
+module.exports.Reaction = require("./reaction");
+module.exports.Address = require("./address");
+module.exports.Call = require("./call");
+module.exports.Friend = require("./friend");
 module.exports.Notification = require("./notification");
 module.exports.Storage = require("./storage");
+module.exports.Country = require("./country");
+module.exports.Interest = require("./interest");
+module.exports.Language = require("./language");
 module.exports.Log = require("./log");

@@ -1,30 +1,35 @@
-const jwt = require("jsonwebtoken");
-const UserModel = require("../models/user");
-const { sendResponse } = require("../helpers/response");
+const jwt = require('jsonwebtoken');
+const { User } = require('../models');
+const { sendResponse } = require('../helpers/response');
+const helperMessages = require('../helpers/englishMessages');
 
 const authenticated = async (req, res, next) => {
-  const token = req.headers.authorization?.split(" ")[1];
+  const token = req.headers.authorization?.split(' ')[1];
   if (!token) {
-    return sendResponse(res, 0, 401, "You are not authorized or token expired");
+    return sendResponse(res, 0, 401, helperMessages.jwtTokenInvalid);
   }
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = await UserModel.findById(decoded.id).select("-password -__v");
+    const foundUser = await User.findById(decoded.id).select(
+      '-password -previousPasswords -__v'
+    );
+    if (!foundUser) {
+      return sendResponse(res, 0, 404, helperMessages.userNotFound);
+    }
+    // if (token !== foundUser.jwtToken) {
+    //   return sendResponse(res, 0, 401, helperMessages.jwtTokenExpired);
+    // }
+    req.user = foundUser;
     next();
   } catch (error) {
-    return sendResponse(res, 0, 401, "You are not authorized");
+    return sendResponse(res, 0, 401, helperMessages.jwtAuthIssue);
   }
 };
 
 const requiredRole = (role) => {
   return (req, res, next) => {
     if (req.user.role !== role) {
-      return sendResponse(
-        res,
-        0,
-        401,
-        "You are not authorized to perform this action"
-      );
+      return sendResponse(res, 0, 401, helperMessages.notAuthorized);
     }
     next();
   };

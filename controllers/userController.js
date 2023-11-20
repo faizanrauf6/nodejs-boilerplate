@@ -1,8 +1,45 @@
-const catchAsyncErrors = require("../middlewares/catchAsyncError");
-const ErrorHandler = require("../utils/errorHandling");
-const { User } = require("../models");
-const { sendResponse } = require("../helpers/response");
-const { logSuccess, logFailure } = require("../services/logs");
+const catchAsyncErrors = require('../middlewares/catchAsyncError');
+const ErrorHandler = require('../utils/errorHandling');
+const { User, Address } = require('../models');
+const { sendResponse } = require('../helpers/response');
+const { logSuccess, logFailure } = require('../services/logs');
+const helperMessages = require('../helpers/englishMessages');
+const consoleLogger = require('../config/logging');
+
+// ! User Existence /api/v1/user/user-existence
+const userExistence = catchAsyncErrors(async (req, res, next) => {
+  /* 
+      #swagger.tags = ['User']
+      #swagger.summary = 'User Existence'
+      #swagger.consumes = ['application/json']
+      #swagger.produces = ['application/json']
+    */
+  const { username } = req.body;
+  const lowercasedUsername = username.toLowerCase(); // Convert username to lowercase
+  let request = {
+    url: req.originalUrl,
+    method: req.originalMethod,
+    body: req.body,
+  };
+
+  try {
+    const userExists = await User.exists({
+      username: lowercasedUsername,
+      isDisabled: false,
+    });
+    const user = userExists ? 1 : 0;
+    if (user) {
+      return next(new ErrorHandler(helperMessages.userExists, 400));
+    }
+    // log data in the try block (success case)
+    await logSuccess(null, null, request, user, __filename, 'userExistence');
+    // send response
+    return sendResponse(res, 1, 200, helperMessages.usernameAvailable);
+  } catch (error) {
+    await logFailure(error, req.user._id, request);
+    return sendResponse(res, 1, 500, error.message);
+  }
+});
 
 // ! Get User Profile /api/v1/user/profile
 const getUserProfile = catchAsyncErrors(async (req, res, next) => {
@@ -15,28 +52,35 @@ const getUserProfile = catchAsyncErrors(async (req, res, next) => {
       BearerAuth: []
     }]
     */
+  const { _id } = req.user;
   let request = {
     url: req.originalUrl,
     method: req.originalMethod,
     body: req.body,
   };
   try {
+    const user = await User.findById(_id)
+      .select('-password -previousPasswords')
+      .populate({
+        path: 'interests',
+        model: 'Interest',
+        select: 'interest',
+      })
+      .lean();
     // log data in the try block (success case)
     await logSuccess(
       null,
-      req.user._id,
+      _id,
       request,
       req.user,
       __filename,
-      "getUserProfile"
+      'getUserProfile'
     );
     // send response
-    return sendResponse(res, 1, 200, "User profile fetched successfully", {
-      user: req.user ? req.user : null,
-    });
+    return sendResponse(res, 1, 200, helperMessages.fetchSingleUser, user);
   } catch (error) {
-    await logFailure(error, req.user._id, request);
-    return next(new ErrorHandler(error.message, 500));
+    await logFailure(error, _id, request);
+    return sendResponse(res, 1, 500, error.message);
   }
 });
 
@@ -51,91 +95,117 @@ const updateProfile = catchAsyncErrors(async (req, res, next) => {
       BearerAuth: []
     }]
     */
-  const { name, email } = req.body;
+  const {
+    firstName,
+    lastName,
+    email,
+    phoneNo,
+    address,
+    latitude,
+    longitude,
+    city,
+    state,
+    zipCode,
+    country,
+    avatar,
+    interests,
+    spokenLang,
+  } = req.body;
+  const { _id } = req.user;
+  let userDetails = {};
   let request = {
     url: req.originalUrl,
     method: req.originalMethod,
     body: req.body,
   };
   try {
-    let userExists = await User.findById(req.user._id);
+    let userExists = await User.findById(_id);
     // ! Check if user exists
     if (!userExists) {
-      return next(new ErrorHandler("User not found", 404));
+      return next(new ErrorHandler('User not found', 404));
     }
+
+    // ! Check if user has an address already
+    const userAddressExists = await Address.findOne({
+      userId: _id,
+      $or: [{ address }, { latitude, longitude }],
+    });
+
+    if (userAddressExists) {
+      consoleLogger.info(helperMessages.addressExists);
+    } else {
+      // ! Saving user address in database
+      await Address.create({
+        userId: _id,
+        address,
+        latitude,
+        longitude,
+        state,
+        city,
+        country,
+        zipCode,
+      });
+      consoleLogger.info('Address has been created');
+    }
+    // add spoken languages
+    if (!spokenLang || spokenLang.length === 0) {
+      consoleLogger.info('No spoken languages found');
+    } else {
+      const previousSpokenLangs = userExists.spokenLangs || [];
+      const newSpokenLang = spokenLang.filter(
+        (lang) => !previousSpokenLangs.includes(lang)
+      );
+      userDetails.spokenLangs = [...previousSpokenLangs, ...newSpokenLang];
+    }
+    // add interests
+    if (!interests || interests.length === 0) {
+      consoleLogger.info('No interests found');
+    } else {
+      const previousInterests = userExists.interests || [];
+      const newInterest = interests.filter(
+        (int) => !previousInterests.includes(int)
+      );
+      userDetails.interests = [...previousInterests, ...newInterest];
+    }
+
     // ! Update user
-    userExists.name = name;
-    userExists.email = email;
-    // ! If user change name then update avatar
-    if (req.body.name) {
-      userExists.avatar = `https://ui-avatars.com/api/?name=${name.replace(
-        " ",
-        "+"
-      )}&background=random`;
+    if (avatar) {
+      userDetails.avatar = avatar;
     }
-    await userExists.save();
+    if (email) {
+      userDetails.email = email;
+    }
+    userDetails.firstName = firstName;
+    userDetails.lastName = lastName;
+    userDetails.phoneNo = phoneNo;
+
+    // saving new users details in database
+    const profileSetup = await User.findByIdAndUpdate(
+      { _id },
+      { $set: userDetails },
+      { new: true }
+    )
+      .select('-password -previousPasswords')
+      .populate({
+        path: 'interests',
+        model: 'Interest',
+        select: 'interest',
+      });
 
     // log data in the try block (success case)
     await logSuccess(
       null,
       userExists._id,
       request,
-      userExists,
+      profileSetup,
       __filename,
-      "updateProfile"
+      'updateProfile'
     );
     // send response
-    return sendResponse(res, 1, 200, "Profile updated successfully");
+    return sendResponse(res, 1, 200, helperMessages.userUpdated, profileSetup);
   } catch (error) {
-    await logFailure(error, req.user._id, request);
-    return next(new ErrorHandler(error.message, 500));
-  }
-});
-
-// ! Update Role /api/v1/user/update-role
-const updateRole = catchAsyncErrors(async (req, res, next) => {
-  /* 
-      #swagger.tags = ['User']
-      #swagger.summary = 'Update Role.'
-      #swagger.consumes = ['application/json']
-      #swagger.produces = ['application/json']
-      #swagger.security = [{
-      BearerAuth: []
-    }]
-    */
-  const { role, email } = req.body;
-  let request = {
-    url: req.originalUrl,
-    method: req.originalMethod,
-    body: req.body,
-  };
-  try {
-    if (req.user.email === email) {
-      return next(new ErrorHandler("You can not change your role", 400));
-    }
-    let userExists = await User.findOne({ email });
-    // ! Check if user exists
-    if (!userExists) {
-      return next(new ErrorHandler("User not found", 404));
-    }
-    // ! Update user
-    userExists.role = role;
-    await userExists.save();
-
-    // log data in the try block (success case)
-    await logSuccess(
-      null,
-      userExists._id,
-      request,
-      userExists,
-      __filename,
-      "updateRole"
-    );
-    // send response
-    return sendResponse(res, 1, 200, "Role updated successfully");
-  } catch (error) {
-    await logFailure(error, req.user._id, request);
-    return next(new ErrorHandler(error.message, 500));
+    await logFailure(error, _id, request);
+    return sendResponse(res, 1, 500, error.message);
   }
 });
 
@@ -169,6 +239,7 @@ const getAllUsers = catchAsyncErrors(async (req, res, next) => {
       }
      */
   const { email, page, limit } = req.query;
+  const { _id } = req.user;
   let request = {
     url: req.originalUrl,
     method: req.originalMethod,
@@ -191,7 +262,12 @@ const getAllUsers = catchAsyncErrors(async (req, res, next) => {
     const users = await User.find(filter)
       .skip(skip)
       .limit(limitNum)
-      .select("-__v");
+      .select('-password -previousPasswords')
+      .populate({
+        path: 'interests',
+        model: 'Interest',
+        select: 'interest',
+      });
 
     // Count the total number of users matching the filter for pagination information.
     const count = await User.countDocuments(filter);
@@ -204,33 +280,58 @@ const getAllUsers = catchAsyncErrors(async (req, res, next) => {
     };
 
     // log data in the try block (success case)
-    await logSuccess(
-      null,
-      req.user._id,
-      request,
-      users,
-      __filename,
-      "getAllUsers"
-    );
+    await logSuccess(null, _id, request, users, __filename, 'getAllUsers');
 
     // send response
     return sendResponse(
       res,
       1,
       200,
-      users.length > 0 ? "Users fetched successfully" : "No user found",
+      users.length > 0
+        ? helperMessages.fetchUsers
+        : helperMessages.userNotFound,
       users,
       pagination
     );
   } catch (error) {
-    await logFailure(error, req.user._id, request);
-    return next(new ErrorHandler(error.message, 500));
+    await logFailure(error, _id, request);
+    return sendResponse(res, 1, 500, error.message);
+  }
+});
+
+// ! Delete Account /api/v1/user/delete-account
+const deleteAccount = catchAsyncErrors(async (req, res, next) => {
+  /* 
+      #swagger.tags = ['User']
+      #swagger.summary = 'Delete Account.'
+      #swagger.consumes = ['application/json']
+      #swagger.produces = ['application/json']
+      #swagger.security = [{
+      BearerAuth: []
+    }]
+    */
+  const { _id } = req.user;
+  let request = {
+    url: req.originalUrl,
+    method: req.originalMethod,
+    body: req.body,
+  };
+  try {
+    const user = await User.findByIdAndUpdate(_id, { isDisabled: true });
+    // log data in the try block (success case)
+    await logSuccess(null, _id, request, user, __filename, 'deleteAccount');
+    // send response
+    return sendResponse(res, 1, 200, helperMessages.accountDeleted);
+  } catch (error) {
+    await logFailure(error, _id, request);
+    return sendResponse(res, 1, 500, error.message);
   }
 });
 
 module.exports = {
-  updateProfile,
-  updateRole,
-  getAllUsers,
+  userExistence,
   getUserProfile,
+  updateProfile,
+  getAllUsers,
+  deleteAccount,
 };
