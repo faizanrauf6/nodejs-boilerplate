@@ -35,4 +35,4 @@ const storage = (folder = "general") => {
   });
 };
 
-module.exports = storage;
+module.exports = { storage, s3Client };

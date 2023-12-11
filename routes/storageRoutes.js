@@ -1,8 +1,8 @@
-const express = require('express');
-const multer = require('multer');
+const express = require("express");
+const multer = require("multer");
 const router = express.Router();
-const { authenticated } = require('../middlewares/auth');
-const { storageController } = require('../controllers');
+const { authenticated } = require("../middlewares/auth");
+const { storageController } = require("../controllers");
 
 // configure multer to use the S3 bucket for file storage
 const upload = multer({
@@ -10,16 +10,15 @@ const upload = multer({
 });
 
 router.post(
-  '/upload-file',
+  "/upload-file",
   authenticated,
-  upload.single('file'),
+  upload.single("file"),
   storageController.uploadFileGCS
 );
-
 router.post(
-  '/upload-file-gcs',
+  "/upload-file-gcs",
   authenticated,
-  upload.single('file'),
+  upload.single("file"),
   storageController.uploadFileUriGCS
 );
 
